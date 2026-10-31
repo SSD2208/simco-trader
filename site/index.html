@@ -232,7 +232,7 @@
 
   function name(it) {
     const r = S.data.resources[String(it.id)];
-    return r ? r.n : "#" + it.id;
+    return r ? (r.fr || r.n) : "#" + it.id;
   }
 
   // ---------- rendu tableau
@@ -295,7 +295,7 @@
     let rows = S.data.items.map((it) => analyse(it, cfg));
     $("tinfo").textContent = S.tPrice ? `Transport : ${money(S.tPrice)} l'unité` : "";
     S.byKey = Object.fromEntries(rows.map((r) => [r.it.k, r]));
-    rows = rows.filter((r) => (qf === "" || String(r.it.q) === qf) && (!txt || name(r.it).toLowerCase().includes(txt)));
+    rows = rows.filter((r) => (qf === "" || String(r.it.q) === qf) && (!txt || name(r.it).toLowerCase().includes(txt) || ((S.data.resources[String(r.it.id)] || {}).n || "").toLowerCase().includes(txt)));
     if (S.tab === "opps") rows = rows.filter((r) => r.roi != null && r.roi >= cfg.margin && (r.liq || 0) >= cfg.liq && r.qty > 0);
     const key = S.tab === "opps" && S.sortKey === "score" ? "score" : S.sortKey;
     rows.sort((a, b) => {
