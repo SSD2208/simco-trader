@@ -1,0 +1,45 @@
+name: Collecte des prix
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"   # toutes les 30 min (GitHub peut décaler de quelques minutes)
+  workflow_dispatch:          # bouton "Run workflow" pour lancer à la main
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: collecte
+  cancel-in-progress: false
+
+jobs:
+  collecte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Relever les prix et construire le site
+        run: python collector/collect.py
+        env:
+          REALM: "1"            # 1 = Entrepreneurs (R2), 0 = Magnates (R1)
+          PAGES_URL: ${{ steps.pages.outputs.base_url }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
