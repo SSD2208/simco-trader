@@ -39,6 +39,8 @@ INTRADAY_DAYS = 14
 CANDLE_DAYS = 90
 SUMMARY_DAYS = 60
 UA = "simco-trader/1.0 (tableau de bord perso, GitHub Actions)"
+GAME_API = os.environ.get("GAME_API", "https://www.simcompanies.com/api/v4")
+LANG = os.environ.get("LANG_NAMES", "fr")
 
 _last_call = [0.0]
 
@@ -128,6 +130,62 @@ def fetch_resources():
             for r in d.get("resources", []):
                 out[str(r["id"])] = {"n": r.get("name", f"#{r['id']}"), "r": bool(r.get("isResearch")), "t": float(r.get("transportation") or 0)}
     return out
+
+
+def _fr_entries(data):
+    """Extrait (id, nom) d'une reponse de l'encyclopedie du jeu, quel que soit son format."""
+    if isinstance(data, dict):
+        for key in ("resources", "results", "data"):
+            if isinstance(data.get(key), list):
+                data = data[key]
+                break
+        else:
+            data = [data] if "name" in data else list(data.values())
+    out = {}
+    for e in data if isinstance(data, list) else []:
+        if not isinstance(e, dict):
+            continue
+        rid = e.get("db_letter", e.get("id", e.get("kind")))
+        name = e.get("name")
+        if rid is not None and isinstance(name, str) and name.strip():
+            out[str(rid)] = name.strip()
+    return out
+
+
+def add_french_names(resources, state):
+    """Ajoute le nom francais ("fr") de chaque ressource, tire de l'encyclopedie du jeu.
+    Une seule tentative par jour ; en cas d'echec on garde les noms anglais."""
+    missing = [k for k, r in resources.items() if not r.get("fr")]
+    if not missing:
+        return
+    tried = state.get("frTriedAt")
+    if tried and (datetime.now(timezone.utc) - parse_dt(tried)).total_seconds() < 20 * 3600:
+        return
+    state["frTriedAt"] = datetime.now(timezone.utc).isoformat()
+    names = {}
+    try:
+        names = _fr_entries(http_json(f"{GAME_API}/{LANG}/{REALM}/encyclopedia/resources/"))
+        log(f"Noms en francais (liste) : {len(names)}")
+    except Exception as e:
+        log(f"! Liste des noms en francais indisponible : {e}")
+    if len(names) < len(missing) * 0.5:
+        # repli : une fiche par ressource (une seule fois, les noms sont ensuite gardes)
+        errors = 0
+        for k in missing:
+            if k in names:
+                continue
+            try:
+                names.update(_fr_entries(http_json(f"{GAME_API}/{LANG}/{REALM}/encyclopedia/resources/0/{k}/", tries=1)))
+                errors = 0
+            except Exception as e:
+                errors += 1
+                log(f"! Nom francais de #{k} indisponible : {e}")
+                if errors >= 3:  # le site du jeu ne repond pas : on abandonne pour aujourd'hui
+                    break
+        log(f"Noms en francais (fiches) : {len(names)}")
+    for k, n in names.items():
+        if k in resources:
+            resources[k]["fr"] = n
 
 
 def fetch_prices():
@@ -234,10 +292,18 @@ def main():
     todo = [key for key in prices if stale or not keys[key]["c"]]
     if stale or not resources or any("t" not in r for r in resources.values()):
         try:
-            resources = fetch_resources() or resources
+            fresh = fetch_resources()
+            for k, r in fresh.items():  # on garde les noms francais deja connus
+                if resources.get(k, {}).get("fr"):
+                    r["fr"] = resources[k]["fr"]
+            resources = fresh or resources
             log(f"{len(resources)} ressources.")
         except Exception as e:
             log(f"! Liste des ressources indisponible : {e}")
+    try:
+        add_french_names(resources, state)
+    except Exception as e:
+        log(f"! Noms en francais : {e}")
     ok = fail = 0
     for n, key in enumerate(todo):
         if time.time() - t0 > 18 * 60:  # garde-fou : on finira au prochain passage
@@ -296,7 +362,8 @@ def main():
     with open(os.path.join(data_dir, "summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, separators=(",", ":"), ensure_ascii=False)
 
-    state = {"version": 1, "candlesAt": state.get("candlesAt"), "resources": resources, "keys": keys,
+    state = {"version": 1, "candlesAt": state.get("candlesAt"), "frTriedAt": state.get("frTriedAt"),
+             "resources": resources, "keys": keys,
              "savedAt": now.isoformat()}
     with open(os.path.join(data_dir, "state.json"), "w", encoding="utf-8") as f:
         json.dump(state, f, separators=(",", ":"), ensure_ascii=False)
