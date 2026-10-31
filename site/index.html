@@ -202,7 +202,7 @@
     r.opp = opp; r.hit = hit;
     r.rate = opp >= 3 ? hit / opp : null;
     // quantite et gain
-    const cap = r.unitsDay ? r.unitsDay * 0.10 * cfg.horizon : 0;
+        const cap = r.unitsDay ? Math.max(r.unitsDay * cfg.horizon >= 1 ? 1 : 0, r.unitsDay * 0.10 * cfg.horizon) : 0;
     r.qty = P > 0 ? Math.floor(Math.min(cfg.budget / P, cap)) : 0;
     r.gain = r.unitGain != null ? r.qty * r.unitGain : null;
     const conf = r.rate == null ? 0.3 : r.rate;
